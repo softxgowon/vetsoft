@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-vetsoft}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-vetsoft}
+      POSTGRES_DB: ${DB_NAME:-vetsoft}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-vetsoft}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./app/server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-vetsoft}
+      DB_PASSWORD: ${DB_PASSWORD:-vetsoft}
+      DB_NAME: ${DB_NAME:-vetsoft}
+      DB_SYNCHRONIZE: ${DB_SYNCHRONIZE:-true}
+      JWT_SECRET: ${JWT_SECRET:-change-me-to-a-long-random-string}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      SEED_ON_START: ${SEED_ON_START:-true}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      SEED_STAFF_PASSWORD: ${SEED_STAFF_PASSWORD:-ChangeMe123!}
+      CLINIC_TIMEZONE: ${CLINIC_TIMEZONE:-Europe/Moscow}
+      CLINIC_PHONE: ${CLINIC_PHONE:-+7 999 999 99 99}
+      CLINIC_EMAIL: ${CLINIC_EMAIL:-mail@vetsoft.local}
+      CLINIC_ADDRESS: ${CLINIC_ADDRESS:-г. Великий Новгород, ул. Кочетова, дом 16/46}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-VetSoft <no-reply@vetsoft.local>}
+    expose:
+      - '3001'
+
+  frontend:
+    build:
+      context: ./app/client
+      args:
+        NUXT_PUBLIC_API_BASE: /api
+        NUXT_PUBLIC_WS_BASE: /
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '${WEB_PORT:-8080}:80'
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  db_data:
