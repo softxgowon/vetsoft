@@ -1,0 +1,82 @@
+# автоматическая публикация клиента на github pages: срабатывает при каждом push в main/master, в том числе при самом первом
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# одновременно идет только одна публикация, более старая отменяется новой
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/client/package-lock.json
+
+      # для репозитория user.github.io сайт лежит в корне, для остальных по адресу /имя-репозитория/
+      - name: Compute base path
+        id: base
+        working-directory: .
+        run: |
+          repo="${{ github.event.repository.name }}"
+          if [[ "$repo" == *.github.io ]]; then base="/"; else base="/$repo/"; fi
+          echo "value=$base" >> "$GITHUB_OUTPUT"
+
+      # бэкенд на github pages не запускается, поэтому адрес api задается переменной репозитория API_BASE_URL (https)
+      - name: Check API url
+        working-directory: .
+        run: |
+          if [ -z "${{ vars.API_BASE_URL }}" ]; then
+            echo "::warning::переменная репозитория API_BASE_URL не задана, сайт откроется, но запросы к api работать не будут"
+          fi
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: Build static site
+        run: npm run generate
+        env:
+          NUXT_APP_BASE_URL: ${{ steps.base.outputs.value }}
+          NUXT_PUBLIC_API_BASE: ${{ vars.API_BASE_URL || 'http://localhost:3001/api' }}
+          NUXT_PUBLIC_WS_BASE: ${{ vars.WS_BASE_URL || vars.API_BASE_URL || 'http://localhost:3001' }}
+
+      # 404.html нужен github pages, чтобы прямые ссылки на внутренние страницы открывали spa, а .nojekyll отключает обработку jekyll
+      - name: Prepare for GitHub Pages
+        run: |
+          cp .output/public/200.html .output/public/404.html
+          touch .output/public/.nojekyll
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/client/.output/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
